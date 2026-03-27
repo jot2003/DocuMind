@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import Stepper from '../components/Stepper';
 import ImageDropzone from '../components/ImageDropzone';
+import CameraCapture from '../components/CameraCapture';
 import ResultView from '../components/ResultView';
 import { verifyIdentity } from '../lib/api';
 import {
@@ -10,6 +11,8 @@ import {
   ShieldCheck,
   RotateCcw,
   Plus,
+  Upload,
+  Camera,
 } from 'lucide-react';
 
 const EKYC_STEPS = [
@@ -49,6 +52,13 @@ export default function VerifyPage() {
   const [processingStep, setProcessingStep] = useState(-1);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [inputMode, setInputMode] = useState<'upload' | 'camera'>('upload');
+  const [cameraOpen, setCameraOpen] = useState(false);
+
+  const [frontPreview, setFrontPreview] = useState<string | null>(null);
+  const [backPreview, setBackPreview] = useState<string | null>(null);
+  const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
 
   const activeProcessingSteps = cccdBackFile
     ? PROCESSING_STEPS_WITH_BACK
@@ -102,6 +112,39 @@ export default function VerifyPage() {
     setResult(null);
     setError(null);
     setProcessingStep(-1);
+    setFrontPreview(null);
+    setBackPreview(null);
+    setSelfiePreview(null);
+    setCameraOpen(false);
+  }
+
+  function handleCameraCapture(file: File, target: 'front' | 'back' | 'selfie') {
+    const url = URL.createObjectURL(file);
+    if (target === 'front') {
+      setCccdFrontFile(file);
+      setFrontPreview(url);
+    } else if (target === 'back') {
+      setCccdBackFile(file);
+      setBackPreview(url);
+    } else {
+      setSelfieFile(file);
+      setSelfiePreview(url);
+    }
+    setCameraOpen(false);
+  }
+
+  function handleFileSelect(file: File, target: 'front' | 'back' | 'selfie') {
+    const url = URL.createObjectURL(file);
+    if (target === 'front') {
+      setCccdFrontFile(file);
+      setFrontPreview(url);
+    } else if (target === 'back') {
+      setCccdBackFile(file);
+      setBackPreview(url);
+    } else {
+      setSelfieFile(file);
+      setSelfiePreview(url);
+    }
   }
 
   return (
@@ -115,11 +158,37 @@ export default function VerifyPage() {
           title="Ảnh CCCD mặt trước"
           subtitle="Chụp hoặc upload ảnh mặt trước căn cước công dân"
         >
-          <ImageDropzone
-            onFileSelect={setCccdFrontFile}
-            selectedFile={cccdFrontFile}
-            label="Kéo thả ảnh CCCD mặt trước vào đây"
-          />
+          <InputModeTabs mode={inputMode} onChange={setInputMode} />
+
+          {inputMode === 'upload' && (
+            <ImageDropzone
+              onFileSelect={(f) => handleFileSelect(f, 'front')}
+              selectedFile={cccdFrontFile}
+              label="Kéo thả ảnh CCCD mặt trước vào đây"
+            />
+          )}
+
+          {inputMode === 'camera' && !cameraOpen && (
+            <CameraStartButton
+              preview={frontPreview}
+              fileName={cccdFrontFile?.name}
+              onOpen={() => setCameraOpen(true)}
+              onClear={() => {
+                setCccdFrontFile(null);
+                setFrontPreview(null);
+              }}
+            />
+          )}
+
+          {inputMode === 'camera' && cameraOpen && (
+            <CameraCapture
+              mode="document"
+              label="Đặt mặt trước CCCD vào khung hướng dẫn"
+              onCapture={(f) => handleCameraCapture(f, 'front')}
+              onClose={() => setCameraOpen(false)}
+            />
+          )}
+
           <StepActions>
             <div />
             <button
@@ -138,11 +207,37 @@ export default function VerifyPage() {
           title="Ảnh CCCD mặt sau"
           subtitle="Mặt sau chứa MRZ và QR code (tùy chọn)"
         >
-          <ImageDropzone
-            onFileSelect={setCccdBackFile}
-            selectedFile={cccdBackFile}
-            label="Kéo thả ảnh CCCD mặt sau vào đây"
-          />
+          <InputModeTabs mode={inputMode} onChange={setInputMode} />
+
+          {inputMode === 'upload' && (
+            <ImageDropzone
+              onFileSelect={(f) => handleFileSelect(f, 'back')}
+              selectedFile={cccdBackFile}
+              label="Kéo thả ảnh CCCD mặt sau vào đây"
+            />
+          )}
+
+          {inputMode === 'camera' && !cameraOpen && (
+            <CameraStartButton
+              preview={backPreview}
+              fileName={cccdBackFile?.name}
+              onOpen={() => setCameraOpen(true)}
+              onClear={() => {
+                setCccdBackFile(null);
+                setBackPreview(null);
+              }}
+            />
+          )}
+
+          {inputMode === 'camera' && cameraOpen && (
+            <CameraCapture
+              mode="document"
+              label="Đặt mặt sau CCCD vào khung hướng dẫn"
+              onCapture={(f) => handleCameraCapture(f, 'back')}
+              onClose={() => setCameraOpen(false)}
+            />
+          )}
+
           <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
             <p className="text-xs text-blue-700">
               Hệ thống sẽ trích xuất thêm thông tin từ MRZ, QR code trên mặt sau
@@ -150,17 +245,17 @@ export default function VerifyPage() {
             </p>
           </div>
           <StepActions>
-            <BackButton onClick={() => setStep(0)} />
+            <BackButton onClick={() => { setStep(0); setCameraOpen(false); }} />
             <div className="flex gap-3">
               <button
-                onClick={() => setStep(2)}
+                onClick={() => { setStep(2); setCameraOpen(false); }}
                 className="flex items-center gap-2 text-slate-500 hover:text-slate-900 text-sm font-medium transition-colors"
               >
                 Bỏ qua <SkipForward size={16} />
               </button>
               {cccdBackFile && (
                 <button
-                  onClick={() => setStep(2)}
+                  onClick={() => { setStep(2); setCameraOpen(false); }}
                   className="flex items-center gap-2 bg-blue-600 text-white px-6 py-2.5 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
                 >
                   Tiếp tục <ArrowRight size={16} />
@@ -176,11 +271,37 @@ export default function VerifyPage() {
           title="Ảnh selfie"
           subtitle="Chụp ảnh chân dung để so sánh với ảnh trên CCCD"
         >
-          <ImageDropzone
-            onFileSelect={setSelfieFile}
-            selectedFile={selfieFile}
-            label="Kéo thả ảnh selfie vào đây"
-          />
+          <InputModeTabs mode={inputMode} onChange={setInputMode} />
+
+          {inputMode === 'upload' && (
+            <ImageDropzone
+              onFileSelect={(f) => handleFileSelect(f, 'selfie')}
+              selectedFile={selfieFile}
+              label="Kéo thả ảnh selfie vào đây"
+            />
+          )}
+
+          {inputMode === 'camera' && !cameraOpen && (
+            <CameraStartButton
+              preview={selfiePreview}
+              fileName={selfieFile?.name}
+              onOpen={() => setCameraOpen(true)}
+              onClear={() => {
+                setSelfieFile(null);
+                setSelfiePreview(null);
+              }}
+            />
+          )}
+
+          {inputMode === 'camera' && cameraOpen && (
+            <CameraCapture
+              mode="face"
+              label="Đưa khuôn mặt vào khung hướng dẫn"
+              onCapture={(f) => handleCameraCapture(f, 'selfie')}
+              onClose={() => setCameraOpen(false)}
+            />
+          )}
+
           <div className="mt-4 bg-slate-50 rounded-lg p-4 border border-slate-100">
             <p className="text-xs font-medium text-slate-600 mb-2">Hướng dẫn</p>
             <ul className="space-y-1 text-xs text-slate-500">
@@ -190,7 +311,7 @@ export default function VerifyPage() {
             </ul>
           </div>
           <StepActions>
-            <BackButton onClick={() => setStep(1)} />
+            <BackButton onClick={() => { setStep(1); setCameraOpen(false); }} />
             <button
               onClick={handleSubmit}
               disabled={!selfieFile}
@@ -286,6 +407,97 @@ export default function VerifyPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function InputModeTabs({
+  mode,
+  onChange,
+}: {
+  mode: 'upload' | 'camera';
+  onChange: (m: 'upload' | 'camera') => void;
+}) {
+  return (
+    <div className="flex gap-1 bg-slate-100 rounded-lg p-1 mb-4 w-fit">
+      <button
+        onClick={() => onChange('upload')}
+        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+          mode === 'upload'
+            ? 'bg-white text-slate-900 shadow-sm'
+            : 'text-slate-500 hover:text-slate-700'
+        }`}
+      >
+        <Upload size={14} /> Upload
+      </button>
+      <button
+        onClick={() => onChange('camera')}
+        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+          mode === 'camera'
+            ? 'bg-white text-slate-900 shadow-sm'
+            : 'text-slate-500 hover:text-slate-700'
+        }`}
+      >
+        <Camera size={14} /> Camera
+      </button>
+    </div>
+  );
+}
+
+function CameraStartButton({
+  preview,
+  fileName,
+  onOpen,
+  onClear,
+}: {
+  preview: string | null;
+  fileName?: string;
+  onOpen: () => void;
+  onClear: () => void;
+}) {
+  if (preview) {
+    return (
+      <div className="border-2 border-green-300 bg-green-50/50 rounded-xl p-6 text-center min-h-[200px] flex items-center justify-center">
+        <div className="space-y-3">
+          <img
+            src={preview}
+            alt="Captured"
+            className="max-h-36 mx-auto rounded-lg shadow-sm"
+          />
+          <p className="text-xs text-slate-500">{fileName}</p>
+          <div className="flex gap-3 justify-center">
+            <button
+              onClick={onClear}
+              className="text-xs text-slate-500 hover:text-red-600 transition-colors"
+            >
+              Xóa
+            </button>
+            <button
+              onClick={onOpen}
+              className="text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors"
+            >
+              Chụp lại
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={onOpen}
+      className="w-full border-2 border-dashed border-slate-200 rounded-xl p-6 text-center min-h-[200px] flex items-center justify-center hover:border-blue-300 hover:bg-blue-50/30 transition-all group"
+    >
+      <div className="space-y-3">
+        <div className="w-14 h-14 mx-auto bg-blue-50 group-hover:bg-blue-100 rounded-2xl flex items-center justify-center transition-colors">
+          <Camera size={24} className="text-blue-500" />
+        </div>
+        <p className="text-sm font-medium text-slate-700">Mở camera để chụp</p>
+        <p className="text-xs text-slate-400">
+          Hệ thống sẽ tự động nhận diện và chụp khi ảnh ổn định
+        </p>
+      </div>
+    </button>
   );
 }
 
