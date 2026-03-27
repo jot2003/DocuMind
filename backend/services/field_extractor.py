@@ -62,7 +62,7 @@ BACK_LABEL_ALIASES = {
     ],
 }
 
-CCCD_NUMBER_PATTERN = re.compile(r"\b0\d{11}\b")
+CCCD_NUMBER_PATTERN = re.compile(r"(?<!\d)\d{12}(?!\d)")
 DATE_PATTERN = re.compile(r"\b\d{2}[/\-\.]\d{2}[/\-\.]\d{4}\b")
 GENDER_PATTERN = re.compile(r"\b(Nam|Nữ|Male|Female)\b", re.IGNORECASE)
 NATIONALITY_PATTERN = re.compile(
@@ -180,18 +180,45 @@ def _find_value_after_label(
     return None
 
 
+_VIET_NAME_RE = re.compile(
+    r"[A-ZÀ-ỹĐ][A-ZÀ-ỹĐa-zà-ỹđ]*"
+    r"(?:\s+[A-ZÀ-ỹĐ][A-ZÀ-ỹĐa-zà-ỹđ]*){1,5}"
+)
+
+_NAME_SKIP = {
+    "cộng", "hòa", "xã", "hội", "chủ", "nghĩa", "căn", "cước", "công", "dân",
+    "citizen", "socialist", "republic", "independent", "freedom", "happiness",
+    "việt", "nam", "viet", "identity", "card", "quốc", "tịch", "nationality",
+    "doc", "lap", "tu", "do", "hanh", "phuc", "giới", "tính", "ngày", "sinh",
+    "full", "name", "date", "birth", "sex", "number", "place", "residence",
+    "origin", "expiry", "cong", "dan",
+}
+
+
 def _find_name_heuristic(line_texts: list[str]) -> str | None:
-    skip_keywords = [
-        "cộng", "hòa", "căn cước", "citizen", "socialist", "republic",
-        "việt nam", "viet nam", "identity", "card", "cong hoa", "xa hoi",
-        "chu nghia", "can cuoc", "quốc tịch", "nationality",
-    ]
-    for line in line_texts:
-        cleaned = line.strip()
-        if not cleaned:
+    cccd_line_idx = -1
+    for i, line in enumerate(line_texts):
+        if re.search(r"\d{12}", line):
+            cccd_line_idx = i
+            break
+
+    candidates = []
+    for i, line in enumerate(line_texts):
+        if cccd_line_idx >= 0 and i < cccd_line_idx:
             continue
-        if cleaned == cleaned.upper() and 2 <= len(cleaned.split()) <= 6:
-            if not any(c.isdigit() for c in cleaned):
-                if not any(kw in cleaned.lower() for kw in skip_keywords):
-                    return cleaned
-    return None
+
+        for m in _VIET_NAME_RE.finditer(line):
+            name_candidate = m.group().strip()
+            words = name_candidate.split()
+            if len(words) < 2 or len(words) > 6:
+                continue
+            if len(name_candidate) < 6:
+                continue
+            lower_words = {w.lower() for w in words}
+            if lower_words & _NAME_SKIP:
+                continue
+            candidates.append(name_candidate.upper())
+
+    if not candidates:
+        return None
+    return max(candidates, key=len)

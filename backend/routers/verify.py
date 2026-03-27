@@ -123,7 +123,7 @@ async def verify_identity(
     # --- Front side: OCR + VLM ---
     try:
         ocr_svc = get_ocr()
-        ocr_result = ocr_svc.extract(cccd_preprocessed)
+        ocr_result = ocr_svc.extract(cccd_cropped)
         ocr_fields = extract_cccd_fields(ocr_result.full_text, ocr_result.lines)
         logger.info("[%s] OCR front done: %d lines, text=%s",
                     request_id, len(ocr_result.lines), ocr_result.full_text[:200])
@@ -159,7 +159,7 @@ async def verify_identity(
         back_preprocessed = preprocess(cccd_back_cropped)
 
         try:
-            ocr_back_result = ocr_svc.extract(back_preprocessed)
+            ocr_back_result = ocr_svc.extract(cccd_back_cropped)
             ocr_back_fields = extract_cccd_back_fields(
                 ocr_back_result.full_text, ocr_back_result.lines
             )

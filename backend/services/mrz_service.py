@@ -80,14 +80,28 @@ def _extract_mrz_lines(text: str) -> list[str]:
 
     ordered = []
     for c in candidates:
-        if c.startswith("IDVNM") or c.startswith("1DVNM"):
-            ordered.insert(0, c)
+        normalized = _normalize_line1_prefix(c)
+        if normalized.startswith("IDVNM"):
+            ordered.insert(0, normalized)
         elif "<<" in c and re.search(r"[A-Z]{3,}", c):
             ordered.append(c)
         else:
             ordered.insert(len(ordered) // 2 if ordered else 0, c)
 
     return ordered[:3]
+
+
+def _normalize_line1_prefix(line: str) -> str:
+    """Fix common OCR misreads of the 'IDVNM' prefix."""
+    if line.startswith("IDVNM") or line.startswith("1DVNM"):
+        return line
+    if line.startswith("VNM") and len(line) >= 28:
+        return "ID" + line
+    if len(line) >= 2 and line[1:].startswith("DVNM"):
+        return "I" + line[1:]
+    if len(line) >= 2 and line[0:2] != "ID" and line[2:].startswith("VNM"):
+        return "ID" + line[2:]
+    return line
 
 
 def _extract_document_number(line1: str) -> str | None:
@@ -115,9 +129,13 @@ def _extract_document_number(line1: str) -> str | None:
         if len(doc_digits) >= 9:
             return doc_digits.zfill(12)
 
-    all_digits = re.findall(r"\d{12}", line1)
+    all_digits = re.findall(r"0\d{11}", line1)
     if all_digits:
-        return all_digits[-1]
+        return all_digits[0]
+
+    any_12 = re.findall(r"\d{12}", line1)
+    if any_12:
+        return any_12[-1]
 
     return None
 

@@ -1,4 +1,5 @@
 import logging
+import re
 
 import cv2
 import numpy as np
@@ -8,6 +9,11 @@ from pytesseract import Output
 from backend.models.schemas import OCRLine, OCRResult
 
 logger = logging.getLogger(__name__)
+
+MIN_CONFIDENCE = 30
+MIN_LINE_LEN = 2
+TARGET_WIDTH = 2400
+JUNK_RATIO_THRESHOLD = 0.6
 
 
 class OCRService:
@@ -33,24 +39,61 @@ class OCRService:
         logger.info("Tesseract OCR ready")
 
     def extract(self, image: np.ndarray) -> OCRResult:
-        enhanced = self._preprocess(image)
+        variants = self._make_variants(image)
 
-        lines = self._run_tesseract(enhanced, psm=6)
+        all_lines: list[OCRLine] = []
+        for name, img in variants:
+            for psm in [6, 3]:
+                lines = self._run_tesseract(img, psm=psm)
+                logger.debug("Variant %s PSM%d → %d lines", name, psm, len(lines))
+                all_lines = self._merge_results(all_lines, lines)
 
-        for alt_psm in [3, 4]:
-            extra = self._run_tesseract(enhanced, psm=alt_psm)
-            lines = self._merge_results(lines, extra)
+        all_lines = self._filter_junk(all_lines)
+        all_lines.sort(key=lambda l: (l.bbox[0][1], l.bbox[0][0]))
+        full_text = "\n".join(l.text for l in all_lines)
 
-        if len(lines) < 3:
-            gray_bin = self._binarize(image)
-            extra = self._run_tesseract(gray_bin, psm=6)
-            lines = self._merge_results(lines, extra)
+        logger.info("OCR extracted %d lines, %d chars", len(all_lines), len(full_text))
+        return OCRResult(lines=all_lines, full_text=full_text)
 
-        lines.sort(key=lambda l: (l.bbox[0][1], l.bbox[0][0]))
-        full_text = "\n".join(l.text for l in lines)
+    def _make_variants(self, image: np.ndarray) -> list[tuple[str, np.ndarray]]:
+        """Create multiple preprocessed versions for Tesseract."""
+        upscaled = self._upscale(image)
 
-        logger.info("OCR extracted %d lines, %d chars", len(lines), len(full_text))
-        return OCRResult(lines=lines, full_text=full_text)
+        gray = cv2.cvtColor(upscaled, cv2.COLOR_BGR2GRAY)
+
+        denoised = cv2.bilateralFilter(gray, 9, 75, 75)
+
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+        enhanced_gray = clahe.apply(denoised)
+
+        _, otsu = cv2.threshold(enhanced_gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+        adaptive = cv2.adaptiveThreshold(
+            enhanced_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY, 31, 10,
+        )
+
+        sharp_kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]], dtype=np.float32) / 1.0
+        sharpened = cv2.filter2D(enhanced_gray, -1, sharp_kernel)
+        sharpened = np.clip(sharpened, 0, 255).astype(np.uint8)
+
+        return [
+            ("enhanced_gray", enhanced_gray),
+            ("otsu", otsu),
+            ("adaptive", adaptive),
+            ("sharpened", sharpened),
+        ]
+
+    @staticmethod
+    def _upscale(image: np.ndarray) -> np.ndarray:
+        h, w = image.shape[:2]
+        if w < TARGET_WIDTH:
+            scale = TARGET_WIDTH / w
+            image = cv2.resize(
+                image, (int(w * scale), int(h * scale)),
+                interpolation=cv2.INTER_CUBIC,
+            )
+        return image
 
     def _run_tesseract(self, image: np.ndarray, psm: int = 6) -> list[OCRLine]:
         if len(image.shape) == 3:
@@ -58,11 +101,9 @@ class OCRService:
         else:
             rgb = image
 
+        config = f"--psm {psm} --oem 1"
         data = pytesseract.image_to_data(
-            rgb,
-            lang="vie+eng",
-            config=f"--psm {psm} --oem 3",
-            output_type=Output.DICT,
+            rgb, lang="vie+eng", config=config, output_type=Output.DICT,
         )
 
         n = len(data["text"])
@@ -71,7 +112,7 @@ class OCRService:
         for i in range(n):
             text = data["text"][i].strip()
             conf = int(data["conf"][i])
-            if not text or conf < 10:
+            if not text or conf < MIN_CONFIDENCE:
                 continue
             key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
             if key not in line_groups:
@@ -99,7 +140,7 @@ class OCRService:
                 total_conf += float(data["conf"][i])
 
             line_text = " ".join(words)
-            if len(line_text.strip()) < 2:
+            if len(line_text.strip()) < MIN_LINE_LEN:
                 continue
 
             avg_conf = total_conf / len(indices) / 100.0
@@ -114,34 +155,23 @@ class OCRService:
         return lines
 
     @staticmethod
-    def _preprocess(image: np.ndarray) -> np.ndarray:
-        h, w = image.shape[:2]
-        if max(h, w) < 1000:
-            scale = 1000 / max(h, w)
-            image = cv2.resize(image, (int(w * scale), int(h * scale)),
-                               interpolation=cv2.INTER_CUBIC)
-
-        lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-        l_ch, a_ch, b_ch = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
-        l_ch = clahe.apply(l_ch)
-        enhanced = cv2.merge([l_ch, a_ch, b_ch])
-        enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
-
-        kernel = np.array([[0, -0.5, 0], [-0.5, 3, -0.5], [0, -0.5, 0]])
-        enhanced = cv2.filter2D(enhanced, -1, kernel)
-        return enhanced
-
-    @staticmethod
-    def _binarize(image: np.ndarray) -> np.ndarray:
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
-        h, w = gray.shape[:2]
-        if max(h, w) < 1000:
-            scale = 1000 / max(h, w)
-            gray = cv2.resize(gray, (int(w * scale), int(h * scale)),
-                              interpolation=cv2.INTER_CUBIC)
-        return cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                     cv2.THRESH_BINARY, 21, 8)
+    def _filter_junk(lines: list[OCRLine]) -> list[OCRLine]:
+        """Remove lines that are mostly non-alphanumeric junk."""
+        clean = []
+        for line in lines:
+            text = line.text.strip()
+            if not text:
+                continue
+            alpha_count = sum(1 for c in text if c.isalnum() or c in "áàảãạăắằẳẵặâấầẩẫậéèẻẽẹêếềểễệíìỉĩịóòỏõọôốồổỗộơớờởỡợúùủũụưứừửữựýỳỷỹỵđÁÀẢÃẠĂẮẰẲẴẶÂẤẦẨẪẬÉÈẺẼẸÊẾỀỂỄỆÍÌỈĨỊÓÒỎÕỌÔỐỒỔỖỘƠỚỜỞỠỢÚÙỦŨỤƯỨỪỬỮỰÝỲỶỸỴĐ/<>")
+            total = len(text.replace(" ", ""))
+            if total == 0:
+                continue
+            ratio = alpha_count / total
+            if ratio >= JUNK_RATIO_THRESHOLD and len(text) >= MIN_LINE_LEN:
+                clean.append(line)
+            else:
+                logger.debug("Filtered junk OCR line: '%s' (ratio=%.2f)", text[:50], ratio)
+        return clean
 
     @staticmethod
     def _merge_results(existing: list[OCRLine], new_lines: list[OCRLine]) -> list[OCRLine]:
@@ -152,15 +182,22 @@ class OCRService:
 
         merged = list(existing)
         for nline in new_lines:
-            is_dup = False
-            for mline in merged:
-                if _bbox_iou(mline.bbox, nline.bbox) > 0.3:
-                    if nline.confidence > mline.confidence:
-                        mline.text = nline.text
-                        mline.confidence = nline.confidence
-                    is_dup = True
-                    break
-            if not is_dup:
+            best_match_idx = -1
+            best_iou = 0.0
+            for idx, mline in enumerate(merged):
+                iou = _bbox_iou(mline.bbox, nline.bbox)
+                if iou > best_iou:
+                    best_iou = iou
+                    best_match_idx = idx
+
+            if best_iou > 0.3 and best_match_idx >= 0:
+                old = merged[best_match_idx]
+                if nline.confidence > old.confidence or (
+                    nline.confidence >= old.confidence * 0.9
+                    and len(nline.text) > len(old.text)
+                ):
+                    merged[best_match_idx] = nline
+            else:
                 merged.append(nline)
         return merged
 
