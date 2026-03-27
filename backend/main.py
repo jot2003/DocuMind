@@ -18,7 +18,14 @@ async def lifespan(app: FastAPI):
     logger.info("Starting DocuMind eKYC API...")
     init_db()
     logger.info("Database initialized")
-    # AI models will be preloaded here in later tasks
+
+    from backend.routers.verify import get_ocr, get_vlm, get_face
+    logger.info("Preloading AI models (this may take a minute on first run)...")
+    get_ocr()
+    get_vlm()
+    get_face()
+    logger.info("All AI models loaded and ready")
+
     yield
     logger.info("Shutting down DocuMind eKYC API...")
 

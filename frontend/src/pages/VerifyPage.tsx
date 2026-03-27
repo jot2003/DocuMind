@@ -37,7 +37,7 @@ export default function VerifyPage() {
         }
         return prev + 1;
       });
-    }, 400);
+    }, 3000);
 
     try {
       const result = await verifyIdentity(cccdFile, selfieFile);

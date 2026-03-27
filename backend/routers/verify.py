@@ -1,4 +1,3 @@
-import json
 import time
 import uuid
 import logging
@@ -8,7 +7,7 @@ from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.models.database import get_db, VerificationRecord
-from backend.models.schemas import VerifyResponse, QualityResult
+from backend.models.schemas import VerifyResponse
 from backend.services.image_quality import assess_quality
 from backend.services.preprocessing import preprocess
 from backend.services.ocr_service import OCRService

@@ -5,7 +5,7 @@ import numpy as np
 def preprocess(image: np.ndarray, max_size: int = 1920) -> np.ndarray:
     """Standardize image for optimal OCR/VLM accuracy."""
     img = _resize_max(image, max_size)
-    img = cv2.fastNlMeansDenoisingColored(img, h=10, hForColorComponents=10)
+    img = cv2.fastNlMeansDenoisingColored(img, None, 10, 10, 7, 21)
     img = _deskew(img)
     return img
 

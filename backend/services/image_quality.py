@@ -17,9 +17,9 @@ def assess_quality(image: np.ndarray) -> QualityResult:
         issues.append("Ảnh bị mờ. Vui lòng chụp lại rõ nét hơn.")
     if brightness < 40:
         issues.append("Ảnh quá tối. Vui lòng chụp ở nơi đủ sáng.")
-    if brightness > 220:
+    if brightness > 245:
         issues.append("Ảnh bị cháy sáng. Vui lòng tránh ánh sáng trực tiếp.")
-    if min(h, w) < 400:
+    if min(h, w) < 200:
         issues.append("Độ phân giải quá thấp. Vui lòng chụp ảnh chất lượng cao hơn.")
 
     return QualityResult(
