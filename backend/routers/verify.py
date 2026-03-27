@@ -268,7 +268,7 @@ def _compute_overall(agreement: float, face_score: float, face_status: str) -> f
     face_weight = 0.4
 
     face_component = face_score if face_status == "match" else 0.0
-    return round(agreement * field_weight + face_component * face_weight, 4)
+    return round(min(agreement * field_weight + face_component * face_weight, 1.0), 4)
 
 
 @router.get("/results")

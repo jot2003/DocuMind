@@ -89,7 +89,7 @@ def cross_check(
         if ocr_fields.get(k) or vlm_fields.get(k) or
         (qr_fields or {}).get(k) or (mrz_fields or {}).get(k)
     )
-    agreement = agree_count / fields_with_any if fields_with_any else 0.0
+    agreement = min(agree_count / fields_with_any, 1.0) if fields_with_any else 0.0
 
     source_count = 2 + (1 if qr_fields else 0) + (1 if mrz_fields else 0)
     logger.info(
@@ -105,8 +105,6 @@ def cross_check(
 
 
 def _compute_similarity(a: str | None, b: str | None) -> float:
-    if a is None and b is None:
-        return 1.0
     if a is None or b is None:
         return 0.0
     return levenshtein_ratio(a.strip().lower(), b.strip().lower())
